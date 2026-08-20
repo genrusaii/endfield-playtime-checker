@@ -1,3 +1,4 @@
+[CmdletBinding()]
 param(
     [string]$CustomPath,
     [switch]$ExportJson,
@@ -6,9 +7,9 @@ param(
 
 & {
     Write-Host "`n┌─────────────────────────────────────────────────┐" -ForegroundColor DarkGray
-    Write-Host "║          endfield-playtime-checker 1.21         ║" -ForegroundColor White
+    Write-Host "║          endfield-playtime-checker 1.22         ║" -ForegroundColor White
     Write-Host "└─────────────────────────────────────────────────┘" -ForegroundColor DarkGray
-    
+
     Write-Host "`n[i] Scanning for Arknights: Endfield logs..." -ForegroundColor Gray
 
     $user = $env:USERNAME
@@ -34,16 +35,16 @@ param(
     }
 
     $files = $files | Sort-Object FullName -Unique
-    if (-not $files) { 
-        Write-Host "[x] Gryphline log files not found. Use -CustomPath 'C:\YourPath' to specify manually." -ForegroundColor Red 
+    if (-not $files) {
+        Write-Host "[x] Gryphline log files not found. Use -CustomPath 'C:\YourPath' to specify manually." -ForegroundColor Red
         Write-Host "`nPress any key to exit..." -ForegroundColor Gray
         $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        return 
+        return
     }
 
     $sessions = [System.Collections.Generic.List[PSCustomObject]]::new()
-    $year = [DateTime]::Now.Year
-    
+    $globalYear = [DateTime]::Now.Year
+
     $totalFiles = $files.Count
     $currentFileIndex = 0
 
@@ -53,42 +54,78 @@ param(
         $filled = [math]::Round($percent / 5)
         $empty = 20 - $filled
         $barProg = ("=" * $filled) + ("-" * $empty)
-        
+
         Write-Host -NoNewline "`r[>] Parsing logs: [$barProg] $percent% ($currentFileIndex/$totalFiles) - $($file.Name)" -ForegroundColor Gray
 
         try {
             $stream = [System.IO.File]::Open($file.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
             $reader = [System.IO.StreamReader]::new($stream)
             $start = $null
+            $fileYear = $globalYear
+            $lastMonth = 0
 
             while ($null -ne ($line = $reader.ReadLine())) {
                 if ($line.Length -lt 12) { continue }
-                if ($line -match 'enter main|create game process|OnGameStart') {
+                
+                # ===== РАСШИРЕННЫЙ ПОИСК СТАРТА СЕССИИ =====
+                # Добавлены новые ключевые слова для запуска через ярлык
+                if ($line -match 'enter main|create game process|OnGameStart|Game started|Session start|PlayerSession|LogGameMode') {
                     $raw = $line.Substring(1, 11)
-                    $start = try { [DateTime]::new($year, $raw[0..1] -join '', $raw[3..4] -join '', $raw[6..7] -join '', $raw[9..10] -join '', 0) } catch {}
+                    
+                    $month = [int]$raw.Substring(0, 2)
+                    if ($lastMonth -eq 12 -and $month -eq 1) { $fileYear++ }
+                    $lastMonth = $month
+                    
+                    $start = try { 
+                        [DateTime]::new(
+                            $fileYear,
+                            $month,
+                            [int]$raw.Substring(3, 2),
+                            [int]$raw.Substring(6, 2),
+                            [int]$raw.Substring(9, 2),
+                            0
+                        ) 
+                    } catch {}
                 }
-                elseif ($start -and ($line -match 'OnAppAboutToQuit|Child process exits|leave main')) {
+                elseif ($start -and ($line -match 'OnAppAboutToQuit|Child process exits|leave main|Game shutdown|Session ended')) {
                     $raw = $line.Substring(1, 11)
-                    $end = try { [DateTime]::new($year, $raw[0..1] -join '', $raw[3..4] -join '', $raw[6..7] -join '', $raw[9..10] -join '', 0) } catch {}
+                    $end = try { 
+                        [DateTime]::new(
+                            $fileYear,
+                            [int]$raw.Substring(0, 2),
+                            [int]$raw.Substring(3, 2),
+                            [int]$raw.Substring(6, 2),
+                            [int]$raw.Substring(9, 2),
+                            0
+                        ) 
+                    } catch {}
                     if ($end) {
                         if ($end -lt $start) { $end = $end.AddDays(1) }
                         $mins = ($end - $start).TotalMinutes
-                        if ($mins -ge 1) { 
-                            $sessions.Add([PSCustomObject]@{ Start = $start; End = $end; Duration = ($end - $start); Mins = $mins }) 
+                        if ($mins -ge 1) {
+                            $sessions.Add([PSCustomObject]@{ 
+                                Start = $start
+                                End = $end
+                                Duration = ($end - $start)
+                                Mins = $mins
+                            })
                         }
                     }
                     $start = $null
                 }
             }
-        } catch {} finally { if ($reader) { $reader.Dispose() }; if ($stream) { $stream.Dispose() } }
+        } catch {} finally { 
+            if ($reader) { $reader.Dispose() }
+            if ($stream) { $stream.Dispose() }
+        }
     }
     Write-Host ""
 
-    if ($sessions.Count -eq 0) { 
+    if ($sessions.Count -eq 0) {
         Write-Host "[x] No valid session data found in logs." -ForegroundColor Yellow
         Write-Host "`nPress any key to exit..." -ForegroundColor Gray
         $null = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        return 
+        return
     }
 
     $totalMins = ($sessions | Measure-Object Mins -Sum).Sum
@@ -126,7 +163,7 @@ param(
 
     Write-Host "`n──────────────────[ GAMING RHYTHM ]──────────────────" -ForegroundColor DarkGray
     $nightMins = ($sessions | Where-Object { $_.Start.Hour -ge 22 -or $_.Start.Hour -lt 6 } | Measure-Object Mins -Sum).Sum
-    $nightPct = [math]::Round(($nightMins / $totalMins) * 100)
+    $nightPct = if ($totalMins -gt 0) { [math]::Round(($nightMins / $totalMins) * 100) } else { 0 }
     Write-Host " > Night Gaming (22-06) : $nightPct% of time" -ForegroundColor Gray
     Write-Host " > Daytime Gaming       : $(100 - $nightPct)% of time" -ForegroundColor Gray
     Write-Host " > Quick Checks (<30m)  : $($sessions | Where-Object Mins -lt 30 | Measure-Object | Select-Object -ExpandProperty Count)" -ForegroundColor Gray
@@ -153,7 +190,7 @@ param(
     'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday' | ForEach-Object {
         $day = $_
         $dMins = ($sessions | Where-Object { $_.Start.DayOfWeek -eq $day } | Measure-Object Mins -Sum).Sum
-        if ($dMins) { 
+        if ($dMins) {
             $span = [TimeSpan]::FromMinutes($dMins)
             Write-Host " > $($day.PadRight(10)) : " -NoNewline -ForegroundColor Gray
             Write-Host "$([math]::Floor($span.TotalHours))h $($span.Minutes)m" -ForegroundColor Green
