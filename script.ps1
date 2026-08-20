@@ -20,11 +20,13 @@ param(
     }
 
     $searchPaths.Add("C:\Users\$user\AppData\LocalLow\Gryphline")
+    $searchPaths.Add("C:\Users\$user\AppData\Local\Gryphline\Endfield\sdklogs")
 
     Get-PSDrive -PSProvider FileSystem | ForEach-Object {
-        $searchPaths.Add("$($_.Root)Gryphline")
-        $searchPaths.Add("$($_.Root)Games\Gryphline")
-        $searchPaths.Add("$($_.Root)Program Files\Gryphline")
+        $root = $_.Root
+        $searchPaths.Add("${root}Gryphline")
+        $searchPaths.Add("${root}Games\Gryphline")
+        $searchPaths.Add("${root}Program Files\Gryphline")
     }
 
     $files = @()
@@ -66,17 +68,15 @@ param(
 
             while ($null -ne ($line = $reader.ReadLine())) {
                 if ($line.Length -lt 12) { continue }
-                
-                # ===== РАСШИРЕННЫЙ ПОИСК СТАРТА СЕССИИ =====
-                # Добавлены новые ключевые слова для запуска через ярлык
+
                 if ($line -match 'enter main|create game process|OnGameStart|Game started|Session start|PlayerSession|LogGameMode') {
                     $raw = $line.Substring(1, 11)
-                    
+
                     $month = [int]$raw.Substring(0, 2)
                     if ($lastMonth -eq 12 -and $month -eq 1) { $fileYear++ }
                     $lastMonth = $month
-                    
-                    $start = try { 
+
+                    $start = try {
                         [DateTime]::new(
                             $fileYear,
                             $month,
@@ -84,12 +84,12 @@ param(
                             [int]$raw.Substring(6, 2),
                             [int]$raw.Substring(9, 2),
                             0
-                        ) 
+                        )
                     } catch {}
                 }
                 elseif ($start -and ($line -match 'OnAppAboutToQuit|Child process exits|leave main|Game shutdown|Session ended')) {
                     $raw = $line.Substring(1, 11)
-                    $end = try { 
+                    $end = try {
                         [DateTime]::new(
                             $fileYear,
                             [int]$raw.Substring(0, 2),
@@ -97,13 +97,13 @@ param(
                             [int]$raw.Substring(6, 2),
                             [int]$raw.Substring(9, 2),
                             0
-                        ) 
+                        )
                     } catch {}
                     if ($end) {
                         if ($end -lt $start) { $end = $end.AddDays(1) }
                         $mins = ($end - $start).TotalMinutes
                         if ($mins -ge 1) {
-                            $sessions.Add([PSCustomObject]@{ 
+                            $sessions.Add([PSCustomObject]@{
                                 Start = $start
                                 End = $end
                                 Duration = ($end - $start)
@@ -114,7 +114,7 @@ param(
                     $start = $null
                 }
             }
-        } catch {} finally { 
+        } catch {} finally {
             if ($reader) { $reader.Dispose() }
             if ($stream) { $stream.Dispose() }
         }
