@@ -1,6 +1,11 @@
 & {
     $user = $env:USERNAME
-    $files = Get-ChildItem "C:\Users\$user\AppData\LocalLow\Gryphline" -Filter "games*.log" -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime
+    $defaultPath = "C:\Users\$user\AppData\LocalLow\Gryphline"
+    $files = if (Test-Path $defaultPath) { Get-ChildItem $defaultPath -Filter "games*.log" -Recurse -ErrorAction SilentlyContinue }
+    if (-not $files) {
+        $files = Get-PSDrive -PSProvider FileSystem | ForEach-Object { Get-ChildItem "$($_.Root)" -Filter "games*.log" -Recurse -ErrorAction SilentlyContinue }
+    }
+    $files = $files | Sort-Object LastWriteTime -Unique
     if (-not $files) { Write-Host "Gryphline log files not found." -ForegroundColor Red; return }
 
     $sessions = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -62,8 +67,8 @@
     $nightMins = ($sessions | Where-Object { $_.Start.Hour -ge 22 -or $_.Start.Hour -lt 6 } | Measure-Object Mins -Sum).Sum
     $nightPct = [math]::Round(($nightMins / $totalMins) * 100)
     Write-Host " > Night Gaming (22:00-06:00): $nightPct% of time"
-    Write-Host " > Daytime Gaming:             $(100 - $nightPct)% of time"
-    Write-Host " > Quick Checks (<30m):        $($sessions | Where-Object Mins -lt 30 | Measure-Object | Select-Object -ExpandProperty Count)"
+    Write-Host " > Daytime Gaming:              $(100 - $nightPct)% of time"
+    Write-Host " > Quick Checks (<30m):         $($sessions | Where-Object Mins -lt 30 | Measure-Object | Select-Object -ExpandProperty Count)"
     Write-Host " > Standard Sessions (30m-3h): $($sessions | Where-Object { $_.Mins -ge 30 -and $_.Mins -le 180 } | Measure-Object | Select-Object -ExpandProperty Count)"
     Write-Host " > Hardcore Marathons (>3h):   $($sessions | Where-Object Mins -gt 180 | Measure-Object | Select-Object -ExpandProperty Count)"
 
